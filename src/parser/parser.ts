@@ -167,6 +167,7 @@ function groupTopListItemsWithDescendants(listItems: ListItemCache[]) {
     } else {
       const previousTopListItem = result[result.length - 1];
       previousTopListItem.descendants.push(current);
+      result.push({ root: current, descendants: [] });
     }
 
     return result;
