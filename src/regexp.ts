@@ -9,12 +9,12 @@ const durationSeparator = `\\s*-{1,2}\\s*`;
 
 const hours = `\\d{1,2}`;
 const minutes = `\\d{2}`;
-const hourMinuteSeparator = `[:. ]`;
+const hourMinuteSeparator = `[hH:. ]`;
 
 const time = `(${hours})(?:${hourMinuteSeparator}?(${minutes}))?\\s*([apAP][mM])?`;
 
 export const timeRegExp = new RegExp(time);
 export const timestampRegExp = new RegExp(
-  `^(?<listTokens>${listToken}${checkboxOrNothing})(?<times>(?<start>${time})(?:${durationSeparator}(?<end>${time}))?)(?<text>.+)$`,
+  `^\\s*(?<listTokens>${listToken}${checkboxOrNothing})(?<times>(?<start>${time})(?:${durationSeparator}(?<end>${time}))?)(?<text>.+)$`,
   "im",
 );
