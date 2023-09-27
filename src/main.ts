@@ -4,59 +4,76 @@ import {
   getDailyNote,
   getDateFromFile,
 } from "obsidian-daily-notes-interface";
-import { get } from "svelte/store";
+import { getAPI } from "obsidian-dataview";
+import type { SvelteComponentDev } from "svelte/internal";
+import { get, Writable } from "svelte/store";
 
 import { viewTypeTimeline, viewTypeWeekly } from "./constants";
-import { appStore } from "./global-stores/app-store";
-import { settings } from "./global-stores/settings";
-import { visibleDateRange } from "./global-stores/visible-date-range";
-import { visibleDayInTimeline } from "./global-stores/visible-day-in-timeline";
-import { DayPlannerSettings } from "./settings";
+import { settings } from "./global-store/settings";
+import { visibleDateRange } from "./global-store/visible-date-range";
+import { visibleDayInTimeline } from "./global-store/visible-day-in-timeline";
+import { DataviewFacade } from "./service/dataview-facade";
+import { ObsidianFacade } from "./service/obsidian-facade";
+import { PlanEditor } from "./service/plan-editor";
+import { DayPlannerSettings, defaultSettings } from "./settings";
 import { DayPlannerSettingsTab } from "./ui/settings-tab";
 import { StatusBar } from "./ui/status-bar";
 import TimelineView from "./ui/timeline-view";
 import WeeklyView from "./ui/weekly-view";
 import { createDailyNoteIfNeeded, dailyNoteExists } from "./util/daily-notes";
 import { getDaysOfCurrentWeek, isToday } from "./util/moment";
-import { getPlanItemsFromFile } from "./util/obsidian";
-import { createPlannerHeading } from "./util/plan";
 
 export default class DayPlanner extends Plugin {
-  settings: DayPlannerSettings;
+  settings: () => DayPlannerSettings;
+  private settingsStore: Writable<DayPlannerSettings>;
   private statusBar: StatusBar;
+  private obsidianFacade: ObsidianFacade;
+  private planEditor: PlanEditor;
+  private statusBarWidget: SvelteComponentDev;
+  private dataviewFacade: DataviewFacade;
 
   async onload() {
-    this.settings = Object.assign(
-      new DayPlannerSettings(),
-      await this.loadData(),
-    );
+    this.settingsStore = await this.initSettingsStore();
+    this.settings = () => get(this.settingsStore);
 
     this.statusBar = new StatusBar(
       this.settings,
       this.addStatusBarItem(),
-      this.app.workspace,
+      this.initTimelineLeaf,
     );
 
     this.registerCommands();
 
+    this.obsidianFacade = new ObsidianFacade(this.app, this.settings);
+    this.planEditor = new PlanEditor(this.settings, this.obsidianFacade);
+    this.dataviewFacade = new DataviewFacade(getAPI(this.app));
+
     this.registerView(
       viewTypeTimeline,
-      (leaf: WorkspaceLeaf) => new TimelineView(leaf, this.settings, this),
+      (leaf: WorkspaceLeaf) =>
+        new TimelineView(
+          leaf,
+          this.settings,
+          this.obsidianFacade,
+          this.planEditor,
+          this.initWeeklyLeaf,
+        ),
     );
 
     this.registerView(
       viewTypeWeekly,
-      (leaf: WorkspaceLeaf) => new WeeklyView(leaf, this),
+      (leaf: WorkspaceLeaf) =>
+        new WeeklyView(
+          leaf,
+          this.settings,
+          this.obsidianFacade,
+          this.planEditor,
+        ),
     );
 
-    this.addRibbonIcon(
-      "calendar-range",
-      "Week plan",
-      async () => await this.initWeeklyLeaf(),
-    );
+    this.addRibbonIcon("calendar-range", "Timeline", this.initTimelineLeaf);
 
-    this.addSettingTab(new DayPlannerSettingsTab(this.app, this));
-    this.initAppAndSettingsStores();
+    this.addSettingTab(new DayPlannerSettingsTab(this, this.settingsStore));
 
     this.app.workspace.onLayoutReady(this.handleLayoutReady);
     this.app.workspace.on("active-leaf-change", this.handleActiveLeafChanged);
@@ -66,6 +83,11 @@ export default class DayPlanner extends Plugin {
       visibleDateRange.update((prev) => [...prev]);
       visibleDayInTimeline.update((prev) => prev.clone());
     });
+    // @ts-ignore
+    this.app.metadataCache.on("dataview:metadata-change", () => {
+      // todo: remove copy-paste
+      console.log(this.dataviewFacade.main());
+    });
 
     this.registerInterval(
       window.setInterval(
@@ -73,6 +95,11 @@ export default class DayPlanner extends Plugin {
         5000,
       ),
     );
+
+    // const statusBarItemEl = this.addStatusBarItem();
+    // this.statusBarWidget = new StatusBarWidget({
+    //   target: statusBarItemEl,
+    // });
   }
 
   private handleActiveLeafChanged = ({ view }: WorkspaceLeaf) => {
@@ -107,7 +134,7 @@ export default class DayPlanner extends Plugin {
     this.addCommand({
       id: "show-weekly-view",
       name: "Show the Week Planner",
-      callback: async () => await this.initWeeklyLeaf(),
+      callback: this.initWeeklyLeaf,
     });
 
     this.addCommand({
@@ -123,50 +150,29 @@ export default class DayPlanner extends Plugin {
       id: "insert-planner-heading-at-cursor",
       name: "Insert Planner Heading at Cursor",
       editorCallback: (editor) =>
-        editor.replaceSelection(createPlannerHeading()),
+        editor.replaceSelection(this.planEditor.createPlannerHeading()),
     });
   }
 
-  private initAppAndSettingsStores() {
-    appStore.set(this.app);
+  private async initSettingsStore() {
+    settings.set({ ...defaultSettings, ...(await this.loadData()) });
 
-    const {
-      zoomLevel,
-      centerNeedle,
-      startHour,
-      timelineDateFormat,
-      plannerHeading,
-      plannerHeadingLevel,
-      timelineColored,
-      timelineStartColor,
-      timelineEndColor,
-    } = this.settings;
+    this.register(
+      settings.subscribe(async (newValue) => {
+        await this.saveData(newValue);
+      }),
+    );
 
-    settings.set({
-      zoomLevel,
-      centerNeedle,
-      startHour,
-      timelineDateFormat,
-      plannerHeading,
-      plannerHeadingLevel,
-      timelineColored,
-      timelineStartColor,
-      timelineEndColor,
-    });
-
-    settings.subscribe(async (newValue) => {
-      this.settings = { ...this.settings, ...newValue };
-      await this.saveData(this.settings);
-    });
+    return settings;
   }
 
   private handleLayoutReady = async () => {
     visibleDateRange.set(getDaysOfCurrentWeek());
   };
 
-  onunload() {
-    this.detachLeavesOfType(viewTypeTimeline);
-    this.detachLeavesOfType(viewTypeWeekly);
+  async onunload() {
+    await this.detachLeavesOfType(viewTypeTimeline);
+    await this.detachLeavesOfType(viewTypeWeekly);
   }
 
   private async updateStatusBarOnFailed(fn: () => Promise<void>) {
@@ -181,31 +187,36 @@ export default class DayPlanner extends Plugin {
   private updateStatusBar = async () => {
     if (dailyNoteExists()) {
       const note = getDailyNote(window.moment(), getAllDailyNotes());
-      const planItems = await getPlanItemsFromFile(note);
+      const planItems = await this.obsidianFacade.getPlanItemsFromFile(note);
       await this.statusBar.update(planItems);
     } else {
       this.statusBar.setEmpty();
     }
   };
 
-  private async initWeeklyLeaf() {
-    this.detachLeavesOfType(viewTypeWeekly);
+  initWeeklyLeaf = async () => {
+    await this.detachLeavesOfType(viewTypeWeekly);
     await this.app.workspace.getLeaf(false).setViewState({
       type: viewTypeWeekly,
       active: true,
     });
-  }
+  };
 
-  private async initTimelineLeaf() {
-    this.detachLeavesOfType(viewTypeTimeline);
+  initTimelineLeaf = async () => {
+    await this.detachLeavesOfType(viewTypeTimeline);
     await this.app.workspace.getRightLeaf(false).setViewState({
       type: viewTypeTimeline,
       active: true,
     });
     this.app.workspace.rightSplit.expand();
-  }
+  };
 
-  private detachLeavesOfType(type: string) {
-    this.app.workspace.getLeavesOfType(type).forEach((leaf) => leaf.detach());
+  private async detachLeavesOfType(type: string) {
+    // Although detatch() is synchronous, without wrapping into a promise, weird things happen:
+    // - when re-initializing the weekly view, it gets deleted every other time instead of getting re-created
+    // - or the tabs get hidden
+    return Promise.all(
+      this.app.workspace.getLeavesOfType(type).map((leaf) => leaf.detach()),
+    );
   }
 }

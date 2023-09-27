@@ -8,6 +8,7 @@ import { timestampRegExp } from "../regexp";
 import type { PlanItem, PlanItemLocation } from "../types";
 import { getId } from "../util/id";
 import { getMinutesSinceMidnightOfDayTo } from "../util/moment";
+import { getEndTime } from "../util/task-utils";
 
 import { calculateDefaultDuration } from "./calculate-default-duration";
 import { parseTimestamp } from "./timestamp/timestamp";
@@ -44,14 +45,12 @@ export function parsePlanItems(
 
       const durationMinutes = calculateDefaultDuration(item, next);
 
-      const endTime =
-        item.endTime || item.startTime.clone().add(durationMinutes, "minutes");
+      const endTime = item.endTime || getEndTime({ ...item, durationMinutes });
 
       return {
         ...item,
         endTime,
         startMinutes: getMinutesSinceMidnightOfDayTo(day, item.startTime),
-        endMinutes: getMinutesSinceMidnightOfDayTo(day, endTime),
         durationMinutes,
       };
     })
@@ -91,6 +90,7 @@ export function getListItemsUnderHeading(
   });
 }
 
+// todo: this belongs to metadata-utils
 export function getHeadingByText(metadata: CachedMetadata, text: string) {
   const { headings = [] } = metadata;
 
@@ -127,7 +127,7 @@ export function createPlanItem({
     rawStartTime: start,
     rawEndTime: end,
     text: getDisplayedText(match, completeContent),
-    firstLineText: text,
+    firstLineText: text.trim(),
     location,
     id: getId(),
   };

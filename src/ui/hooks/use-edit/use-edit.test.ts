@@ -1,7 +1,6 @@
 import { get, writable } from "svelte/store";
 
-import { currentTime } from "../../../global-stores/current-time";
-import { settingsWithUtils } from "../../../global-stores/settings-with-utils";
+import { defaultSettingsForTests } from "../../../settings";
 import { timeToMinutes } from "../../../util/moment";
 import { basePlanItem } from "../test-utils";
 
@@ -10,71 +9,65 @@ import { useEdit } from "./use-edit";
 
 const baseTasks = [basePlanItem];
 
-function getBaseUseTaskProps() {
-  const cursorOffsetY = writable(0);
+function createProps({ tasks } = { tasks: baseTasks }) {
+  const pointerOffsetY = writable(0);
+
+  function movePointerTo(time: string) {
+    pointerOffsetY.set(timeToMinutes(time));
+  }
+
   return {
-    settings: settingsWithUtils,
-    currentTime,
-    cursorOffsetY,
-    onUpdate: jest.fn(),
-    onMouseUp: jest.fn(),
+    pointerOffsetY,
+    parsedTasks: tasks,
+    settings: writable(defaultSettingsForTests),
+    onUpdate: () => Promise.resolve(),
+    movePointerTo,
   };
 }
 
 describe("drag one & common edit mechanics", () => {
   test("with no edit in progress, tasks don't change", () => {
-    const { cursorOffsetY } = getBaseUseTaskProps();
+    const props = createProps();
+    const { pointerOffsetY } = props;
 
-    const { displayedTasks } = useEdit({
-      pointerOffsetY: cursorOffsetY,
-      parsedTasks: baseTasks,
-      settings: settingsWithUtils.settings,
-    });
+    const { displayedTasks } = useEdit(props);
 
-    cursorOffsetY.set(200);
+    pointerOffsetY.set(200);
 
     expect(get(displayedTasks)).toEqual(baseTasks);
   });
 
   test("when drag starts, target task reacts to cursor", () => {
-    const { cursorOffsetY } = getBaseUseTaskProps();
+    const { movePointerTo, ...props } = createProps();
 
-    const { displayedTasks, startEdit } = useEdit({
-      pointerOffsetY: cursorOffsetY,
-      parsedTasks: baseTasks,
-      settings: settingsWithUtils.settings,
-    });
+    const { displayedTasks, startEdit } = useEdit(props);
 
-    startEdit(basePlanItem, EditMode.DRAG);
-    cursorOffsetY.set(timeToMinutes("09:00"));
+    startEdit({ task: basePlanItem, mode: EditMode.DRAG });
+    movePointerTo("09:00");
 
     const [updatedItem] = get(displayedTasks);
 
     expect(updatedItem).toMatchObject({
       startMinutes: timeToMinutes("09:00"),
-      endMinutes: timeToMinutes("10:00"),
+      durationMinutes: 60,
     });
   });
 
   test("after edit confirmation, tasks freeze and stop reacting to cursor", () => {
-    const { cursorOffsetY } = getBaseUseTaskProps();
+    const { movePointerTo, ...props } = createProps();
 
-    const { displayedTasks, startEdit, confirmEdit } = useEdit({
-      pointerOffsetY: cursorOffsetY,
-      parsedTasks: baseTasks,
-      settings: settingsWithUtils.settings,
-    });
+    const { displayedTasks, startEdit, confirmEdit } = useEdit(props);
 
-    startEdit(basePlanItem, EditMode.DRAG);
-    cursorOffsetY.set(timeToMinutes("09:00"));
+    startEdit({ task: basePlanItem, mode: EditMode.DRAG });
+    movePointerTo("09:00");
     confirmEdit();
-    cursorOffsetY.set(timeToMinutes("10:00"));
+    movePointerTo("10:00");
 
     const [updatedItem] = get(displayedTasks);
 
     expect(updatedItem).toMatchObject({
       startMinutes: timeToMinutes("09:00"),
-      endMinutes: timeToMinutes("10:00"),
+      durationMinutes: 60,
     });
   });
 });
@@ -86,27 +79,23 @@ describe("drag many", () => {
       {
         ...basePlanItem,
         startMinutes: timeToMinutes("01:10"),
-        endMinutes: timeToMinutes("02:10"),
+        durationMinutes: 60,
         id: "2",
       },
     ];
 
-    const { cursorOffsetY } = getBaseUseTaskProps();
+    const { movePointerTo, ...props } = createProps({ tasks });
 
-    const { displayedTasks, startEdit } = useEdit({
-      pointerOffsetY: cursorOffsetY,
-      parsedTasks: tasks,
-      settings: settingsWithUtils.settings,
-    });
+    const { displayedTasks, startEdit } = useEdit(props);
 
-    startEdit(basePlanItem, EditMode.DRAG_AND_SHIFT_OTHERS);
-    cursorOffsetY.set(timeToMinutes("01:10"));
+    startEdit({ task: basePlanItem, mode: EditMode.DRAG_AND_SHIFT_OTHERS });
+    movePointerTo("01:10");
 
     const [, next] = get(displayedTasks);
 
     expect(next).toMatchObject({
       startMinutes: timeToMinutes("02:10"),
-      endMinutes: timeToMinutes("03:10"),
+      durationMinutes: 60,
     });
   });
 
@@ -116,28 +105,24 @@ describe("drag many", () => {
       {
         ...basePlanItem,
         startMinutes: timeToMinutes("01:10"),
-        endMinutes: timeToMinutes("02:10"),
+        durationMinutes: 60,
         id: "2",
       },
     ];
 
-    const { cursorOffsetY } = getBaseUseTaskProps();
+    const { movePointerTo, ...props } = createProps({ tasks });
 
-    const { displayedTasks, startEdit } = useEdit({
-      pointerOffsetY: cursorOffsetY,
-      parsedTasks: tasks,
-      settings: settingsWithUtils.settings,
-    });
+    const { displayedTasks, startEdit } = useEdit(props);
 
-    startEdit(basePlanItem, EditMode.DRAG_AND_SHIFT_OTHERS);
-    cursorOffsetY.set(timeToMinutes("01:10"));
-    cursorOffsetY.set(timeToMinutes("00:00"));
+    startEdit({ task: basePlanItem, mode: EditMode.DRAG_AND_SHIFT_OTHERS });
+    movePointerTo("01:10");
+    movePointerTo("00:00");
 
     const [, next] = get(displayedTasks);
 
     expect(next).toMatchObject({
       startMinutes: timeToMinutes("01:10"),
-      endMinutes: timeToMinutes("02:10"),
+      durationMinutes: 60,
     });
   });
 
@@ -146,41 +131,53 @@ describe("drag many", () => {
       {
         ...basePlanItem,
         startMinutes: timeToMinutes("01:00"),
-        endMinutes: timeToMinutes("02:00"),
+        durationMinutes: 60,
         id: "1",
       },
       {
         ...basePlanItem,
         startMinutes: timeToMinutes("02:00"),
-        endMinutes: timeToMinutes("03:00"),
+        durationMinutes: 60,
         id: "2",
       },
     ];
 
-    const { cursorOffsetY } = getBaseUseTaskProps();
+    const { movePointerTo, ...props } = createProps({ tasks });
 
-    const { displayedTasks, startEdit } = useEdit({
-      pointerOffsetY: cursorOffsetY,
-      parsedTasks: tasks,
-      settings: settingsWithUtils.settings,
-    });
+    const { displayedTasks, startEdit } = useEdit(props);
 
-    startEdit(tasks[1], EditMode.DRAG_AND_SHIFT_OTHERS);
-    cursorOffsetY.set(timeToMinutes("01:30"));
+    startEdit({ task: tasks[1], mode: EditMode.DRAG_AND_SHIFT_OTHERS });
+    movePointerTo("01:30");
 
     const [previous, edited] = get(displayedTasks);
 
     expect(edited).toMatchObject({
       startMinutes: timeToMinutes("01:30"),
-      endMinutes: timeToMinutes("02:30"),
+      durationMinutes: 60,
     });
     expect(previous).toMatchObject({
       startMinutes: timeToMinutes("00:30"),
-      endMinutes: timeToMinutes("01:30"),
+      durationMinutes: 60,
     });
   });
 
   test.todo("tasks stop moving once there is not enough time");
 });
 
-describe("drag one with pushing neighbor", () => {});
+describe("create", () => {
+  test.skip("create a task", () => {
+    const { movePointerTo, ...props } = createProps();
+
+    const { displayedTasks, startEdit } = useEdit(props);
+
+    startEdit({ task: basePlanItem, mode: EditMode.DRAG });
+    movePointerTo("09:00");
+
+    const [createdItem] = get(displayedTasks);
+
+    expect(createdItem).toMatchObject({
+      startMinutes: timeToMinutes("09:00"),
+      durationMinutes: 30,
+    });
+  });
+});

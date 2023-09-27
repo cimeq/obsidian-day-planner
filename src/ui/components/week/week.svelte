@@ -1,22 +1,19 @@
 <script lang="ts">
-  import {
-    getAllDailyNotes,
-    getDailyNote,
-  } from "obsidian-daily-notes-interface";
+  import { getContext } from "svelte";
+  import { writable } from "svelte/store";
 
-  import { visibleHours } from "../../../global-stores/settings-utils";
-  import { visibleDateRange } from "../../../global-stores/visible-date-range";
+  import { obsidianContext } from "../../../constants";
+  import { visibleHours } from "../../../global-store/settings-utils";
+  import { visibleDateRange } from "../../../global-store/visible-date-range";
+  import type { ObsidianContext } from "../../../types";
   import { isToday } from "../../../util/moment";
-  import {
-    addPlacing,
-    getPlanItemsFromFile,
-    openFileForDay,
-  } from "../../../util/obsidian";
   import Column from "../column.svelte";
   import ControlButton from "../control-button.svelte";
   import Needle from "../needle.svelte";
   import Ruler from "../ruler.svelte";
   import TaskContainer from "../task-container.svelte";
+
+  const { obsidianFacade } = getContext<ObsidianContext>(obsidianContext);
 </script>
 
 <div class="week-header">
@@ -26,7 +23,7 @@
       <ControlButton
         --color={isToday(day) ? "white" : "var(--icon-color)"}
         label="Open note for day"
-        on:click={async () => await openFileForDay(day)}
+        on:click={async () => await obsidianFacade.openFileForDay(day)}
       >
         {day.format("MMM D, ddd")}
       </ControlButton>
@@ -42,12 +39,7 @@
           {#if isToday(day)}
             <Needle autoScrollBlocked={true} />
           {/if}
-
-          {#await getPlanItemsFromFile(getDailyNote(day, getAllDailyNotes())) then tasks}
-            <TaskContainer {day} tasks={addPlacing(tasks)} />
-          {:catch error}
-            <pre>Could not render tasks: {error}</pre>
-          {/await}
+          <TaskContainer day={writable(day)} />
         </Column>
       </div>
     </div>

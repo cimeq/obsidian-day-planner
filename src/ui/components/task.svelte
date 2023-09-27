@@ -1,61 +1,19 @@
 <script lang="ts">
-  import { noop } from "lodash";
-  import { GripVertical, Copy } from "lucide-svelte";
-  import type { Readable } from "svelte/store";
-
-  import { currentTime } from "../../global-stores/current-time";
-  import {
-    editCancellation,
-    editConfirmation,
-  } from "../../global-stores/edit-events";
-  import { settingsWithUtils } from "../../global-stores/settings-with-utils";
-  import type { PlacedPlanItem, PlanItem } from "../../types";
+  import { currentTime } from "../../global-store/current-time";
+  import { settingsWithUtils } from "../../global-store/settings-with-utils";
+  import type { PlacedPlanItem } from "../../types";
   import { useTask } from "../hooks/use-task";
 
   import RenderedMarkdown from "./rendered-markdown.svelte";
 
-  export let copyModifierPressed: boolean;
   export let planItem: PlacedPlanItem;
-  export let pointerYOffset: Readable<number>;
-  export let onUpdate: (planItem: PlanItem) => Promise<void>;
-  export let onMouseUp: (planItem: PlanItem) => Promise<void>;
-  export let onCopy: () => void;
+  export let onResizeStart: (event: MouseEvent) => void;
 
-  $: ({
-    height,
-    offset,
-    relationToNow,
-    cursor,
-    startMove,
-    confirmMove,
-    cancelMove,
-    cancelResize,
-    startResize,
-    confirmResize,
-    backgroundColor,
-    properContrastColors,
-    handleMouseUp,
-  } = useTask(planItem, {
-    settings: settingsWithUtils,
-    cursorOffsetY: pointerYOffset,
-    currentTime,
-    onUpdate,
-    onMouseUp,
-  }));
-
-  $: {
-    $editConfirmation;
-
-    confirmMove();
-    confirmResize();
-  }
-
-  $: {
-    $editCancellation;
-
-    cancelMove();
-    cancelResize();
-  }
+  $: ({ height, offset, relationToNow, backgroundColor, properContrastColors } =
+    useTask(planItem, {
+      settings: settingsWithUtils,
+      currentTime,
+    }));
 </script>
 
 <div
@@ -70,7 +28,7 @@
     class="task {$relationToNow}"
     class:is-ghost={planItem.isGhost}
     on:mousedown={(event) => event.stopPropagation()}
-    on:mouseup={handleMouseUp}
+    on:mouseup
   >
     <RenderedMarkdown
       --text-faint={$properContrastColors.faint}
@@ -78,45 +36,27 @@
       --text-normal={$properContrastColors.normal}
       text={planItem.text}
     />
-    {#if !planItem.isGhost}
-      {#if copyModifierPressed}
-        <div
-          class="grip"
-          on:mousedown|stopPropagation={onCopy}
-          on:mouseup|stopPropagation={noop}
-        >
-          <Copy class="svg-icon" />
-        </div>
-      {:else}
-        <div
-          style:cursor={$cursor}
-          class="grip"
-          on:mousedown|stopPropagation={startMove}
-        >
-          <GripVertical class="svg-icon" />
-        </div>
-      {/if}
-    {/if}
-    <div
-      class="resize-handle absolute-stretch-x"
-      on:mousedown|stopPropagation={startResize}
-    ></div>
+    <slot />
+    <hr
+      class="workspace-leaf-resize-handle"
+      on:mousedown|stopPropagation={onResizeStart}
+    />
   </div>
 </div>
 
 <style>
-  .grip {
-    position: relative;
-    right: -4px;
+  :not(#dummy).workspace-leaf-resize-handle {
+    cursor: row-resize;
 
-    grid-column: 2;
-    align-self: flex-start;
+    right: 0;
+    bottom: 0;
+    left: 0;
 
-    color: var(--text-faint);
-  }
+    display: block; /* obsidian hides them sometimes, we don't want that */
 
-  .grip:hover {
-    color: var(--text-muted);
+    height: calc(var(--divider-width-hover) * 2);
+
+    border-bottom-width: var(--divider-width);
   }
 
   .gap-box {
@@ -153,11 +93,5 @@
 
   .is-ghost {
     opacity: 0.6;
-  }
-
-  .resize-handle {
-    cursor: s-resize;
-    bottom: -8px;
-    height: 16px;
   }
 </style>

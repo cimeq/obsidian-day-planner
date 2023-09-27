@@ -1,8 +1,8 @@
-import type { Workspace } from "obsidian";
-
 import type { DayPlannerSettings } from "../settings";
 import type { PlanItem } from "../types";
+import { ellipsis } from "../util/ellipsis";
 import { getDiffInMinutes } from "../util/moment";
+import { getEndTime } from "../util/task-utils";
 
 export class StatusBar {
   private statusBarText: HTMLSpanElement;
@@ -16,9 +16,9 @@ export class StatusBar {
   private currentTime: string;
 
   constructor(
-    private readonly settings: DayPlannerSettings,
+    private readonly settings: () => DayPlannerSettings,
     private readonly containerEl: HTMLElement,
-    private readonly workspace: Workspace,
+    private readonly onClick: () => Promise<void>,
   ) {
     // todo: this is redundant
     this.containerEl.addClass("day-planner");
@@ -57,7 +57,7 @@ export class StatusBar {
 
   private setupStatusBarEvents() {
     this.containerEl.onClickEvent(async () => {
-      // todo: open daily note
+      await this.onClick();
     });
 
     this.containerEl.on("mouseenter", ".day-planner", () => {
@@ -79,15 +79,16 @@ export class StatusBar {
     const now = window.moment();
 
     const currentItemIndex = planItems.findIndex(
-      (item) => item.startTime.isBefore(now) && item.endTime.isAfter(now),
+      (item) => item.startTime.isBefore(now) && getEndTime(item).isAfter(now),
     );
 
     if (currentItemIndex < 0) {
       this.hideProgress();
-      this.statusBarText.innerText = this.settings.endLabel;
+      this.statusBarText.innerText = this.settings().endLabel;
       return;
     }
 
+    console.log({ planItems });
     // todo: move calculations out
     const currentItem = planItems[currentItemIndex];
     const nextItem = planItems[currentItemIndex + 1];
@@ -107,7 +108,7 @@ export class StatusBar {
       );
     }
 
-    if (this.settings.circularProgress) {
+    if (this.settings().circularProgress) {
       this.statusBarProgress.hide();
       this.progressCircle(percentageComplete);
     } else {
@@ -158,28 +159,22 @@ export class StatusBar {
   }
 
   private updateStatusBarText(currentItem: PlanItem, nextItem?: PlanItem) {
-    if (this.settings.nowAndNextInStatusBar) {
-      this.statusBarText.textContent = `Now: ${
-        currentItem.rawStartTime
-      } ${this.ellipsis(currentItem.text, 15)}`;
+    const minutesLeft = getDiffInMinutes(
+      getEndTime(currentItem),
+      window.moment(),
+    );
+    const timeLeft = window.moment
+      .utc(window.moment.duration(minutesLeft, "minutes").asMilliseconds())
+      .format("HH:mm");
 
-      if (nextItem) {
-        this.nextText.textContent = `Next: ${
-          nextItem.rawStartTime
-        } ${this.ellipsis(nextItem.text, 15)}`;
+    this.statusBarText.textContent = `-${timeLeft}`;
 
-        this.nextText.show();
-      }
-
-      this.nextText.hide();
-    } else {
-      this.nextText.hide();
-      const minutesLeft = getDiffInMinutes(
-        currentItem.endTime,
-        window.moment(),
-      );
-      this.statusBarText.textContent = `Minutes left: ${minutesLeft}`;
-    }
+    this.nextText.hide();
+    const trimmedNow = ellipsis(currentItem.firstLineText, 15);
+    const trimmedNext = nextItem ? ellipsis(nextItem.firstLineText, 15) : "";
+    this.statusBarText.textContent =
+      `▶ ${trimmedNow} (-${timeLeft})` +
+      (trimmedNext.length > 0 ? " ▶▶ " + trimmedNext : "");
   }
 
   private taskNotification(
@@ -189,7 +184,7 @@ export class StatusBar {
     nextTaskText: string,
   ) {
     if (
-      this.settings.showTaskNotification &&
+      this.settings().showTaskNotification &&
       this.currentTime !== undefined &&
       this.currentTime !== current.startTime.toString()
     ) {
@@ -199,14 +194,6 @@ export class StatusBar {
       });
     }
     this.currentTime = current.startTime.toString();
-  }
-
-  // todo: this doesn't belong to the class
-  private ellipsis(input: string, limit: number) {
-    if (input.length <= limit) {
-      return input;
-    }
-    return input.substring(0, limit) + "...";
   }
 
   private setupHorizontalProgressBar() {

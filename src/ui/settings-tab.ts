@@ -1,15 +1,20 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { PluginSettingTab, Setting } from "obsidian";
+import type { Writable } from "svelte/store";
 
 import { icons } from "../constants";
-import { settings } from "../global-stores/settings";
 import type DayPlanner from "../main";
+import type { DayPlannerSettings } from "../settings";
 
 export class DayPlannerSettingsTab extends PluginSettingTab {
-  plugin: DayPlanner;
+  constructor(
+    private readonly plugin: DayPlanner,
+    private readonly settingsStore: Writable<DayPlannerSettings>,
+  ) {
+    super(plugin.app, plugin);
+  }
 
-  constructor(app: App, plugin: DayPlanner) {
-    super(app, plugin);
-    this.plugin = plugin;
+  private update(patch: Partial<DayPlannerSettings>) {
+    this.settingsStore.update((previous) => ({ ...previous, ...patch }));
   }
 
   display(): void {
@@ -22,10 +27,9 @@ export class DayPlannerSettingsTab extends PluginSettingTab {
       .setDesc("Display a circular progress bar in the status bar")
       .addToggle((toggle) =>
         toggle
-          .setValue(this.plugin.settings.circularProgress)
+          .setValue(this.plugin.settings().circularProgress)
           .onChange((value: boolean) => {
-            this.plugin.settings.circularProgress = value;
-            this.plugin.saveData(this.plugin.settings);
+            this.update({ circularProgress: value });
           }),
       );
 
@@ -34,10 +38,11 @@ export class DayPlannerSettingsTab extends PluginSettingTab {
       .setDesc("Display now and next tasks in the status bar")
       .addToggle((toggle) =>
         toggle
-          .setValue(this.plugin.settings.nowAndNextInStatusBar)
+          .setValue(this.plugin.settings().nowAndNextInStatusBar)
           .onChange((value: boolean) => {
-            this.plugin.settings.nowAndNextInStatusBar = value;
-            this.plugin.saveData(this.plugin.settings);
+            this.update({
+              nowAndNextInStatusBar: value,
+            });
           }),
       );
 
@@ -46,10 +51,9 @@ export class DayPlannerSettingsTab extends PluginSettingTab {
       .setDesc("Display a notification when a new task is started")
       .addToggle((toggle) =>
         toggle
-          .setValue(this.plugin.settings.showTaskNotification)
+          .setValue(this.plugin.settings().showTaskNotification)
           .onChange((value: boolean) => {
-            this.plugin.settings.showTaskNotification = value;
-            this.plugin.saveData(this.plugin.settings);
+            this.update({ showTaskNotification: value });
           }),
       );
 
@@ -61,13 +65,10 @@ export class DayPlannerSettingsTab extends PluginSettingTab {
       .addSlider((slider) =>
         slider
           .setLimits(1, 5, 1)
-          .setValue(Number(this.plugin.settings.zoomLevel) ?? 4)
+          .setValue(Number(this.plugin.settings().zoomLevel) ?? 4)
           .setDynamicTooltip()
-          .onChange(async (value: number) => {
-            settings.update((settings) => ({ ...settings, zoomLevel: value }));
-
-            this.plugin.settings.zoomLevel = value;
-            await this.plugin.saveData(this.plugin.settings);
+          .onChange((value: number) => {
+            this.update({ zoomLevel: value });
           }),
       );
 
@@ -80,11 +81,10 @@ export class DayPlannerSettingsTab extends PluginSettingTab {
         icons.forEach((icon) => dropdown.addOption(icon, icon));
         return dropdown
           .setValue(
-            this.plugin.settings.timelineIcon ?? "calendar-with-checkmark",
+            this.plugin.settings().timelineIcon ?? "calendar-with-checkmark",
           )
           .onChange((value: string) => {
-            this.plugin.settings.timelineIcon = value;
-            this.plugin.saveData(this.plugin.settings);
+            this.update({ timelineIcon: value });
           });
       });
 
@@ -108,19 +108,46 @@ export class DayPlannerSettingsTab extends PluginSettingTab {
             "11": "11",
             "12": "12",
           })
-          .setValue(String(this.plugin.settings.startHour))
-          .onChange(async (value: string) => {
+          .setValue(String(this.plugin.settings().startHour))
+          .onChange((value: string) => {
             const asNumber = Number(value);
 
-            settings.update((previous) => ({
-              ...previous,
-              startHour: asNumber,
-            }));
-
-            this.plugin.settings.startHour = asNumber;
-            await this.plugin.saveData(this.plugin.settings);
+            this.update({ startHour: asNumber });
           }),
       );
+
+    new Setting(containerEl)
+      .setName("Default timestamp format")
+      .then((component) => {
+        component.setDesc(
+          createFragment((fragment) => {
+            fragment.appendText(
+              "When you create or edit tasks with drag-and-drop, the plugin use this format. Your current syntax looks like this: ",
+            );
+            component.addMomentFormat((momentFormat) =>
+              momentFormat
+                .setValue(this.plugin.settings().timestampFormat)
+                .setSampleEl(fragment.createSpan())
+                .onChange((value: string) => {
+                  this.update({ timestampFormat: value.trim() });
+                }),
+            );
+            fragment.append(
+              createEl("br"),
+              createEl(
+                "a",
+                {
+                  text: "format reference",
+                  href: "https://momentjs.com/docs/#/displaying/format/",
+                },
+                (a) => {
+                  a.setAttr("target", "_blank");
+                },
+              ),
+            );
+          }),
+        );
+      });
 
     new Setting(containerEl)
       .setName("Date Format in Timeline Header")
@@ -130,16 +157,10 @@ export class DayPlannerSettingsTab extends PluginSettingTab {
             fragment.appendText("Your current syntax looks like this: ");
             component.addMomentFormat((momentFormat) =>
               momentFormat
-                .setValue(this.plugin.settings.timelineDateFormat)
+                .setValue(this.plugin.settings().timelineDateFormat)
                 .setSampleEl(fragment.createSpan())
-                .onChange(async (value: string) => {
-                  settings.update((previous) => ({
-                    ...previous,
-                    timelineDateFormat: value,
-                  }));
-
-                  this.plugin.settings.timelineDateFormat = value;
-                  await this.plugin.saveData(this.plugin.settings);
+                .onChange((value: string) => {
+                  this.update({ timelineDateFormat: value });
                 }),
             );
             fragment.append(
@@ -166,15 +187,9 @@ export class DayPlannerSettingsTab extends PluginSettingTab {
       )
       .addToggle((component) => {
         component
-          .setValue(this.plugin.settings.centerNeedle)
-          .onChange(async (value) => {
-            settings.update((previous) => ({
-              ...previous,
-              centerNeedle: value,
-            }));
-
-            this.plugin.settings.centerNeedle = value;
-            await this.plugin.saveData(this.plugin.settings);
+          .setValue(this.plugin.settings().centerNeedle)
+          .onChange((value) => {
+            this.update({ centerNeedle: value });
           });
       });
 
@@ -186,15 +201,9 @@ When you open a file, the plugin will search for this heading to detect a day pl
       )
       .addText((component) =>
         component
-          .setValue(this.plugin.settings.plannerHeading)
-          .onChange(async (value) => {
-            settings.update((previous) => ({
-              ...previous,
-              plannerHeading: value,
-            }));
-
-            this.plugin.settings.plannerHeading = value;
-            await this.plugin.saveData(this.plugin.settings);
+          .setValue(this.plugin.settings().plannerHeading)
+          .onChange((value) => {
+            this.update({ plannerHeading: value });
           }),
       );
 
@@ -207,15 +216,9 @@ When you open a file, the plugin will search for this heading to detect a day pl
         component
           .setLimits(1, 6, 1)
           .setDynamicTooltip()
-          .setValue(this.plugin.settings.plannerHeadingLevel)
-          .onChange(async (value) => {
-            settings.update((previous) => ({
-              ...previous,
-              plannerHeadingLevel: value,
-            }));
-
-            this.plugin.settings.plannerHeadingLevel = value;
-            await this.plugin.saveData(this.plugin.settings);
+          .setValue(this.plugin.settings().plannerHeadingLevel)
+          .onChange((value) => {
+            this.update({ plannerHeadingLevel: value });
           }),
       );
 
@@ -226,15 +229,9 @@ When you open a file, the plugin will search for this heading to detect a day pl
       )
       .addToggle((component) => {
         component
-          .setValue(this.plugin.settings.timelineColored)
-          .onChange(async (value) => {
-            settings.update((previous) => ({
-              ...previous,
-              timelineColored: value,
-            }));
-
-            this.plugin.settings.timelineColored = value;
-            await this.plugin.saveData(this.plugin.settings);
+          .setValue(this.plugin.settings().timelineColored)
+          .onChange((value) => {
+            this.update({ timelineColored: value });
           });
       });
 
@@ -242,15 +239,9 @@ When you open a file, the plugin will search for this heading to detect a day pl
       .setName("Colorful Timeline - Start Color")
       .addColorPicker((component) => {
         component
-          .setValue(this.plugin.settings.timelineStartColor)
-          .onChange(async (value) => {
-            settings.update((previous) => ({
-              ...previous,
-              timelineStartColor: value,
-            }));
-
-            this.plugin.settings.timelineStartColor = value;
-            await this.plugin.saveData(this.plugin.settings);
+          .setValue(this.plugin.settings().timelineStartColor)
+          .onChange((value) => {
+            this.update({ timelineStartColor: value });
           });
       });
 
@@ -258,58 +249,10 @@ When you open a file, the plugin will search for this heading to detect a day pl
       .setName("Colorful Timeline - End Color")
       .addColorPicker((component) => {
         component
-          .setValue(this.plugin.settings.timelineEndColor)
-          .onChange(async (value) => {
-            settings.update((previous) => ({
-              ...previous,
-              timelineEndColor: value,
-            }));
-
-            this.plugin.settings.timelineEndColor = value;
-            await this.plugin.saveData(this.plugin.settings);
+          .setValue(this.plugin.settings().timelineEndColor)
+          .onChange((value) => {
+            this.update({ timelineEndColor: value });
           });
       });
-  }
-
-  private modeDescriptionContent(): DocumentFragment {
-    const descEl = document.createDocumentFragment();
-    descEl.appendText("Choose between 3 modes to use the Day Planner plugin:");
-    descEl.appendChild(document.createElement("br"));
-    descEl
-      .appendChild(document.createElement("strong"))
-      .appendText("File mode");
-    descEl.appendChild(document.createElement("br"));
-    descEl.appendText(
-      "Plugin automatically generates day planner notes for each day within a Day Planners folder.",
-    );
-    descEl.appendChild(document.createElement("br"));
-    descEl
-      .appendChild(document.createElement("strong"))
-      .appendText("Command mode");
-    descEl.appendChild(document.createElement("br"));
-    descEl.appendText(
-      "Command used to insert a Day Planner for today within the current note.",
-    );
-    descEl.appendChild(document.createElement("br"));
-    descEl
-      .appendChild(document.createElement("strong"))
-      .appendText("Daily mode");
-    descEl.appendChild(document.createElement("br"));
-    descEl.appendText(
-      "Plugin automatically links to the current daily note. Daily notes plugin must be enabled.",
-    );
-    descEl.appendChild(document.createElement("br"));
-    this.addDocsLink(descEl);
-    return descEl;
-  }
-
-  private addDocsLink(descEl: DocumentFragment) {
-    const a = document.createElement("a");
-    a.href =
-      "https://github.com/lynchjames/obsidian-day-planner/blob/main/README.md";
-    a.text = "plugin README";
-    a.target = "_blank";
-    descEl.appendChild(a);
-    descEl.appendChild(document.createElement("br"));
   }
 }

@@ -1,14 +1,17 @@
 <script lang="ts">
   import { Component, MarkdownRenderer } from "obsidian";
-  import { onDestroy } from "svelte";
+  import { getContext, onDestroy } from "svelte";
 
-  import { appStore } from "../../global-stores/app-store";
+  import { obsidianContext } from "../../constants";
+  import type { ObsidianContext } from "../../types";
+
   export let text: string;
 
   let markdownLifecycleManager = new Component();
   let el: HTMLDivElement;
 
-  // todo: this should be hidden in an action
+  const { obsidianFacade } = getContext<ObsidianContext>(obsidianContext);
+
   onDestroy(() => {
     markdownLifecycleManager.unload();
   });
@@ -18,7 +21,13 @@
     markdownLifecycleManager = new Component();
 
     el.empty();
-    MarkdownRenderer.render($appStore, text, el, "", markdownLifecycleManager);
+    MarkdownRenderer.render(
+      obsidianFacade.app,
+      text,
+      el,
+      "",
+      markdownLifecycleManager,
+    );
     markdownLifecycleManager.load();
 
     el.querySelectorAll(`input[type="checkbox"]`)?.forEach((checkbox) =>
@@ -49,13 +58,13 @@
   }
 
   .rendered-markdown :global(input[type="checkbox"]) {
-      top: 2px;
+    top: 2px;
     margin-inline-end: 4px;
     border-color: var(--text-muted);
   }
 
   .rendered-markdown :global(li) {
-      color: var(--text-normal);
+    color: var(--text-normal);
   }
 
   .rendered-markdown :global(li.task-list-item[data-task="x"]),
